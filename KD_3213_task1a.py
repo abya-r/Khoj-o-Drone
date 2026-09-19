@@ -4,10 +4,23 @@ import argparse
 import os
 import sys
 
+
+ARENA_DIM = 900
+GRID_DIVISIONS = 12
+
+CORNER_MARKER_IDS = None
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--image", required=True)
+    p.add_argument(
+        "--show",
+        action="store_true",
+        help="Display the debug composite in a window (needs a display).",
+    )
     return p.parse_args()
+
 
 def load_image_and_validate(path):
     img = cv2.imread(path)
@@ -15,6 +28,7 @@ def load_image_and_validate(path):
         print("Image not found")
         sys.exit()
     return img
+
 
 def detect_aruco_markers(img):
     d = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
@@ -31,9 +45,19 @@ def detect_aruco_markers(img):
     ids = ids.flatten()
     return ids, corners
 
-def extract_playing_field_corners(ids, marker_corners):
-    if ids is None or len(ids) < 4:
+
+def extract_playing_field_corners(ids, marker_corners, corner_ids=CORNER_MARKER_IDS):
+    if ids is None:
         print("Required markers not found")
+        sys.exit()
+
+    if corner_ids is not None:
+        keep = [i for i, marker_id in enumerate(ids) if marker_id in corner_ids]
+        ids = [ids[i] for i in keep]
+        marker_corners = [marker_corners[i] for i in keep]
+
+    if len(ids) != 4:
+        print(f"Expected exactly 4 corner markers, found {len(ids)}")
         sys.exit()
 
     centers = []
@@ -64,7 +88,8 @@ def extract_playing_field_corners(ids, marker_corners):
 
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
-def straighten_arena(img, ids, marker_corners, target_dim=900):
+
+def straighten_arena(img, ids, marker_corners, target_dim=ARENA_DIM):
     src_points = extract_playing_field_corners(ids, marker_corners)
 
     dst_points = np.array([
@@ -79,19 +104,22 @@ def straighten_arena(img, ids, marker_corners, target_dim=900):
 
     return rectified_img
 
-def generate_grid_intersections():
-    intersections = {}
-    cell_size = 900.0 / 12.0
-    cols = [chr(ord('A') + i) for i in range(11)]
 
-    for row_idx in range(1, 12):
-        for col_idx in range(11):
+def generate_grid_intersections(target_dim=ARENA_DIM, divisions=GRID_DIVISIONS):
+    intersections = {}
+    cell_size = target_dim / float(divisions)
+    num_lines = divisions - 1  # interior grid lines only
+    cols = [chr(ord('A') + i) for i in range(num_lines)]
+
+    for row_idx in range(1, divisions):
+        for col_idx in range(num_lines):
             x = (col_idx + 1) * cell_size
             y = row_idx * cell_size
             label = f"{cols[col_idx]}{row_idx}"
             intersections[label] = (x, y)
 
     return intersections
+
 
 def isolate_survivors(rectified_img):
     hsv = cv2.cvtColor(rectified_img, cv2.COLOR_BGR2HSV)
@@ -133,6 +161,7 @@ def isolate_survivors(rectified_img):
 
     return red_triangles, yellow_circles
 
+
 def compute_centroid(contour):
     M = cv2.moments(contour)
     if M["m00"] != 0:
@@ -143,6 +172,7 @@ def compute_centroid(contour):
         cx = x + w / 2.0
         cy = y + h / 2.0
     return (cx, cy)
+
 
 def match_to_nearest_intersection(centroid, intersections):
     cx, cy = centroid
@@ -156,6 +186,7 @@ def match_to_nearest_intersection(centroid, intersections):
             closest_label = label
 
     return closest_label
+
 
 def render_debug_composite(rectified_img, intersections, red_data, yellow_data):
     result = rectified_img.copy()
@@ -179,30 +210,35 @@ def render_debug_composite(rectified_img, intersections, red_data, yellow_data):
 
     return result
 
+
 def export_results(image_path, marker_ids, critical_list, stable_list):
     base_path = os.path.splitext(image_path)[0]
     out_file = f"{base_path}_results.txt"
 
-    sorted_ids = sorted(marker_ids)
+    sorted_ids = sorted(int(i) for i in marker_ids)
     crit_str = ", ".join(critical_list)
     stab_str = ", ".join(stable_list)
 
-    line1 = f"Detected marker IDs: {sorted_ids}"
-    line3 = f"Critical Survivors: {crit_str}"
-    line4 = f"Stable Survivors: {stab_str}"
+    marker_line = f"Detected marker IDs: {sorted_ids}"
+    critical_line = f"Critical Survivors: {crit_str}"
+    stable_line = f"Stable Survivors: {stab_str}"
 
     with open(out_file, "w") as f:
-        f.write(line1 + "\n\n")
-        f.write(line3 + "\n")
-        f.write(line4 + "\n")
+        f.write(marker_line + "\n\n")
+        f.write(critical_line + "\n")
+        f.write(stable_line + "\n")
+
+    return out_file
+
 
 def main():
     args = parse_args()
     img = load_image_and_validate(args.image)
     ids, corners = detect_aruco_markers(img)
 
-    rectified_img = straighten_arena(img, ids, corners)
-    intersections = generate_grid_intersections()
+    target_dim = ARENA_DIM
+    rectified_img = straighten_arena(img, ids, corners, target_dim=target_dim)
+    intersections = generate_grid_intersections(target_dim=target_dim)
     red_contours, yellow_contours = isolate_survivors(rectified_img)
 
     critical_labels = []
@@ -222,12 +258,22 @@ def main():
         yellow_centers.append(center)
 
     debug_img = render_debug_composite(rectified_img, intersections, red_centers, yellow_centers)
-    
-    cv2.imshow("Debug Composite", debug_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
-    export_results(args.image, list(ids), critical_labels, stable_labels)
+    out_file = export_results(args.image, list(ids), critical_labels, stable_labels)
+    print(f"Results written to {out_file}")
+
+    debug_path = f"{os.path.splitext(args.image)[0]}_debug.png"
+    cv2.imwrite(debug_path, debug_img)
+    print(f"Debug image written to {debug_path}")
+
+    if args.show:
+        try:
+            cv2.imshow("Debug Composite", debug_img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        except cv2.error as e:
+            print(f"Could not open a display window ({e}); see {debug_path} instead.")
+
 
 if __name__ == "__main__":
     main()
