@@ -65,7 +65,6 @@ def generate_grid_intersections():
 def isolate_survivors(rectified_img):
     hsv = cv2.cvtColor(rectified_img, cv2.COLOR_BGR2HSV)
 
-    # Red HSV Mask Range (Critical Survivors)[cite: 3]
     lower_red1 = np.array([0, 100, 100])
     upper_red1 = np.array([10, 255, 255])
     lower_red2 = np.array([170, 100, 100])
@@ -75,27 +74,25 @@ def isolate_survivors(rectified_img):
     mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
     mask_red = cv2.bitwise_or(mask_red1, mask_red2)
 
-    # Yellow HSV Mask Range (Stable Survivors)[cite: 3]
     lower_yellow = np.array([20, 100, 100])
     upper_yellow = np.array([35, 255, 255])
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-    # Find raw shape contours
     raw_red_contours, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     raw_yellow_contours, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     red_triangles = []
-    # FILTER RED CRITICAL SURVIVORS: Must be a Red TRIANGLE (3 vertices)[cite: 3]
+    
     for cnt in raw_red_contours:
         area = cv2.contourArea(cnt)
-        if area > 40:  # Noise threshold
+        if area > 40:
             perimeter = cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, 0.04 * perimeter, True)
             if len(approx) == 3:
                 red_triangles.append(cnt)
 
     yellow_circles = []
-    # FILTER YELLOW STABLE SURVIVORS: Must be a Yellow CIRCLE[cite: 3]
+    
     for cnt in raw_yellow_contours:
         area = cv2.contourArea(cnt)
         if area > 40:  # Noise threshold
