@@ -18,4 +18,3 @@ def detect_aruco_markers(img):
 
 # ADITRI'S PART
 
-
