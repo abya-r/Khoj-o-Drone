@@ -39,11 +39,61 @@ def detect_aruco_markers(img):
 
 # ADITRI'S PART
 
-def straighten_arena(img, marker_corners):
-    # add code
+def extract_playing_field_corners(ids, marker_corners):
+    # Ensure at least 4 markers are detected
+    if ids is None or len(ids) < 4:
+        print("Required markers not found")
+        sys.exit()
 
-def generate_grid_intersections():
-    # add code
+    # Calculate center point for each detected marker
+    centers = []
+    for corner_set in marker_corners:
+        pts = corner_set[0]
+        center = np.mean(pts, axis=0)
+        centers.append((center, pts))
+
+    # Calculate overall centroid of all 4 markers combined
+    all_centers = np.array([c[0] for c in centers])
+    overall_center = np.mean(all_centers, axis=0)
+
+    # Select the vertex from each marker closest to the center (the inner playing field corner)
+    inner_corners = []
+    for center, pts in centers:
+        distances = [np.linalg.norm(pt - overall_center) for pt in pts]
+        closest_idx = np.argmin(distances)
+        inner_corners.append(pts[closest_idx])
+
+    inner_corners = np.array(inner_corners, dtype=np.float32)
+
+    # Sort inner corners in top-left, top-right, bottom-left, bottom-right order
+    indices_y = np.argsort(inner_corners[:, 1])
+    top_two = inner_corners[indices_y[:2]]
+    bottom_two = inner_corners[indices_y[2:]]
+
+    tl = top_two[np.argmin(top_two[:, 0])]
+    tr = top_two[np.argmax(top_two[:, 0])]
+    bl = bottom_two[np.argmin(bottom_two[:, 0])]
+    br = bottom_two[np.argmax(bottom_two[:, 0])]
+
+    return np.array([tl, tr, br, bl], dtype=np.float32)
+
+def straighten_arena(img, ids, marker_corners, target_dim=900):
+    # Extract the 4 inner playing field boundary points
+    src_points = extract_playing_field_corners(ids, marker_corners)
+
+    # Define destination coordinates for an exact 900x900 square canvas
+    dst_points = np.array([
+        [0, 0],
+        [target_dim - 1, 0],
+        [target_dim - 1, target_dim - 1],
+        [0, target_dim - 1]
+    ], dtype=np.float32)
+
+    # Calculate homography matrix and warp image to top-down view
+    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+    rectified_img = cv2.warpPerspective(img, matrix, (target_dim, target_dim))
+
+    return rectified_img
 
 # ABYA'S PART
 
