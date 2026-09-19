@@ -107,6 +107,41 @@ def isolate_survivors(rectified_img):
 # KRITIKA'S PART
 
 def render_debug_composite(rectified_img, intersections, red_data, yellow_data):
-    # add code
+
+
+    result = rectified_img.copy()
+
+
+    for point in intersections:
+        x = int(point[0])
+        y = int(point[1])
+
+        cv2.circle(result, (x, y), 3, (255, 0, 0), -1)
+
+    
+    for point in red_data:
+        x = int(point[0])
+        y = int(point[1])
+
+        cv2.circle(result, (x, y), 7, (0, 0, 255), 2)
+        cv2.putText(result, "R", (x + 5, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 0, 255), 1)
+
+
+    for point in yellow_data:
+        x = int(point[0])
+        y = int(point[1])
+
+        cv2.circle(result, (x, y), 7, (0, 255, 255), 2)
+        cv2.putText(result, "Y", (x + 5, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 255, 255), 1)
+
+    cv2.imshow("Debug Composite", result)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    return result
 
 # MAIN PIPELINE EXECUTION ENGINE
