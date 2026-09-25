@@ -1,0 +1,16 @@
+#opencv
+
+import cv2
+
+img = cv2.imread("frame.jpg")            # loaded as BGR, not RGB
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+# Example range for "green" — remember OpenCV's Hue is 0-179, not 0-359
+lower_green = (35, 80, 80)
+upper_green = (85, 255, 255)
+mask = cv2.inRange(hsv, lower_green, upper_green)
+
+cv2.imshow("mask", mask)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
