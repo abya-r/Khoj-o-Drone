@@ -343,7 +343,6 @@ def main():
     out_path = base + "_results.txt"
     with open(out_path, "w") as f:
         f.write(f"Detected marker IDs: {sorted(REQUIRED_IDS)}\n")
-        f.write("\n")
         f.write("Critical Survivors: " + ", ".join(results["red"]) + "\n")
         f.write("Stable Survivors: " + ", ".join(results["yellow"]) + "\n")
     print("Wrote", out_path)
@@ -354,5 +353,9 @@ def main():
         print("Wrote", dbg_path)
 
 
+# Function Name:    main (built in)
+#        Inputs:    None
+#       Outputs:    None
+#       Purpose:    To call the main() function to execute image processing.
 if __name__ == "__main__":
     main()
