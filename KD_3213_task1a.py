@@ -2,7 +2,7 @@
 # Team ID:          3213
 # Theme:            Khoj-o-Drone
 # Author List:      Aditri Khanna, Abya Rao, Anamika Kumari, Kritika Raj
-# Filename:         task1a.py
+# Filename:         KD_3213_task1a.py
 # Functions:        detect_markers, order_tl_tr_br_bl, rectify, build_grid,
 #                   colour_masks, find_contours, centre_of, nearest_name, main
 # Global variables: REQUIRED_IDS, SIZE, CELLS, MIN_AREA
