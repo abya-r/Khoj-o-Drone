@@ -1,278 +1,357 @@
-import cv2
-import numpy as np
+'''
+# Team ID:          3213
+# Theme:            Khoj-o-Drone
+# Author List:      Aditri Khanna, Abya Rao, Anamika Kumari, Kritika Raj
+# Filename:         task1a.py
+# Functions:        detect_markers, order_tl_tr_br_bl, rectify, build_grid,
+#                   colour_masks, find_contours, centre_of, nearest_name, main
+# Global variables: REQUIRED_IDS, SIZE, CELLS, MIN_AREA
+'''
+
 import argparse
 import os
 import sys
 
+import cv2
+import numpy as np
 
-ARENA_DIM = 900
-GRID_DIVISIONS = 12
-
-CORNER_MARKER_IDS = None
-
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--image", required=True)
-    p.add_argument(
-        "--show",
-        action="store_true",
-        help="Display the debug composite in a window (needs a display).",
-    )
-    return p.parse_args()
+REQUIRED_IDS = [80, 85, 90, 95]
+SIZE = 900            # rectified canvas is SIZE x SIZE
+CELLS = 12            # 12 x 12 cells -> 11 interior lines each way
+MIN_AREA = 150        # px^2 on the 900x900 canvas; smaller blobs are noise
 
 
-def load_image_and_validate(path):
-    img = cv2.imread(path)
-    if img is None:
-        print("Image not found")
-        sys.exit()
-    return img
+def detect_markers(img):
+    '''
+    Purpose:
+    ---
+    Detects all ArUco 4x4_250 markers in the image. Works on both the
+    new (>= 4.7) and the legacy OpenCV ArUco API.
+
+    Input Arguments:
+    ---
+    `img` :  [ numpy.ndarray ]
+        BGR image loaded with cv2.imread
+
+    Returns:
+    ---
+    `found` :  [ dict ]
+        {marker_id: 4x2 float32 array of corner points}
+
+    Example call:
+    ---
+    markers = detect_markers(img)
+    '''
+    aruco = cv2.aruco
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_250)
+    if hasattr(aruco, "ArucoDetector"):            # OpenCV >= 4.7
+        detector = aruco.ArucoDetector(dictionary, aruco.DetectorParameters())
+        corners, ids, _ = detector.detectMarkers(img)
+    else:                                          # OpenCV < 4.7 (legacy API)
+        params = (aruco.DetectorParameters_create()
+                  if hasattr(aruco, "DetectorParameters_create")
+                  else aruco.DetectorParameters())
+        corners, ids, _ = aruco.detectMarkers(img, dictionary, parameters=params)
+    found = {}
+    if ids is not None:
+        for c, i in zip(corners, ids.flatten()):
+            found[int(i)] = c.reshape(4, 2).astype(np.float32)
+    return found
 
 
-def detect_aruco_markers(img):
-    d = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
-    p = cv2.aruco.DetectorParameters()
-    a = cv2.aruco.ArucoDetector(d, p)
+def order_tl_tr_br_bl(pts):
+    '''
+    Purpose:
+    ---
+    Orders four points as top-left, top-right, bottom-right, bottom-left
+    (image coordinates, y pointing down).
 
-    res = a.detectMarkers(img)
-    corners, ids = res[0], res[1]
+    Input Arguments:
+    ---
+    `pts` :  [ array-like, shape (4, 2) ]
+        four unordered (x, y) points
 
-    if ids is None:
-        print("No markers found")
-        sys.exit()
+    Returns:
+    ---
+    `ordered` :  [ numpy.ndarray, shape (4, 2) ]
+        the points in TL, TR, BR, BL order
 
-    ids = ids.flatten()
-    return ids, corners
-
-
-def extract_playing_field_corners(ids, marker_corners, corner_ids=CORNER_MARKER_IDS):
-    if ids is None:
-        print("Required markers not found")
-        sys.exit()
-
-    if corner_ids is not None:
-        keep = [i for i, marker_id in enumerate(ids) if marker_id in corner_ids]
-        ids = [ids[i] for i in keep]
-        marker_corners = [marker_corners[i] for i in keep]
-
-    if len(ids) != 4:
-        print(f"Expected exactly 4 corner markers, found {len(ids)}")
-        sys.exit()
-
-    centers = []
-    for corner_set in marker_corners:
-        pts = corner_set[0]
-        center = np.mean(pts, axis=0)
-        centers.append((center, pts))
-
-    all_centers = np.array([c[0] for c in centers])
-    overall_center = np.mean(all_centers, axis=0)
-
-    inner_corners = []
-    for center, pts in centers:
-        distances = [np.linalg.norm(pt - overall_center) for pt in pts]
-        closest_idx = np.argmin(distances)
-        inner_corners.append(pts[closest_idx])
-
-    inner_corners = np.array(inner_corners, dtype=np.float32)
-
-    indices_y = np.argsort(inner_corners[:, 1])
-    top_two = inner_corners[indices_y[:2]]
-    bottom_two = inner_corners[indices_y[2:]]
-
-    tl = top_two[np.argmin(top_two[:, 0])]
-    tr = top_two[np.argmax(top_two[:, 0])]
-    bl = bottom_two[np.argmin(bottom_two[:, 0])]
-    br = bottom_two[np.argmax(bottom_two[:, 0])]
-
-    return np.array([tl, tr, br, bl], dtype=np.float32)
+    Example call:
+    ---
+    src = order_tl_tr_br_bl(inner_corners)
+    '''
+    pts = np.asarray(pts, dtype=np.float32)
+    s = pts.sum(axis=1)
+    d = pts[:, 0] - pts[:, 1]
+    return np.array([pts[np.argmin(s)],   # TL: smallest x+y
+                     pts[np.argmax(d)],   # TR: largest x-y
+                     pts[np.argmax(s)],   # BR: largest x+y
+                     pts[np.argmin(d)]],  # BL: smallest x-y
+                    dtype=np.float32)
 
 
-def straighten_arena(img, ids, marker_corners, target_dim=ARENA_DIM):
-    src_points = extract_playing_field_corners(ids, marker_corners)
+def rectify(img, markers):
+    '''
+    Purpose:
+    ---
+    Perspective-warps the playing field to a SIZE x SIZE top-down view,
+    using each marker's inner corner (the one nearest the arena centre).
 
-    dst_points = np.array([
-        [0, 0],
-        [target_dim - 1, 0],
-        [target_dim - 1, target_dim - 1],
-        [0, target_dim - 1]
-    ], dtype=np.float32)
+    Input Arguments:
+    ---
+    `img` :  [ numpy.ndarray ]
+        original BGR image
 
-    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
-    rectified_img = cv2.warpPerspective(img, matrix, (target_dim, target_dim))
+    `markers` :  [ dict ]
+        output of detect_markers containing all REQUIRED_IDS
 
-    return rectified_img
+    Returns:
+    ---
+    `rect` :  [ numpy.ndarray ]
+        SIZE x SIZE rectified BGR image
 
-
-def generate_grid_intersections(target_dim=ARENA_DIM, divisions=GRID_DIVISIONS):
-    intersections = {}
-    cell_size = target_dim / float(divisions)
-    num_lines = divisions - 1  # interior grid lines only
-    cols = [chr(ord('A') + i) for i in range(num_lines)]
-
-    for row_idx in range(1, divisions):
-        for col_idx in range(num_lines):
-            x = (col_idx + 1) * cell_size
-            y = row_idx * cell_size
-            label = f"{cols[col_idx]}{row_idx}"
-            intersections[label] = (x, y)
-
-    return intersections
-
-
-def isolate_survivors(rectified_img):
-    hsv = cv2.cvtColor(rectified_img, cv2.COLOR_BGR2HSV)
-
-    lower_red1 = np.array([0, 70, 50])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 70, 50])
-    upper_red2 = np.array([180, 255, 255])
-
-    mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-
-    lower_yellow = np.array([15, 70, 50])
-    upper_yellow = np.array([35, 255, 255])
-    mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
-    raw_red_contours, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    raw_yellow_contours, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    red_triangles = []
-    for cnt in raw_red_contours:
-        area = cv2.contourArea(cnt)
-        if area > 30:
-            perimeter = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.04 * perimeter, True)
-            if len(approx) == 3:
-                red_triangles.append(cnt)
-
-    yellow_circles = []
-    for cnt in raw_yellow_contours:
-        area = cv2.contourArea(cnt)
-        if area > 30:
-            perimeter = cv2.arcLength(cnt, True)
-            if perimeter > 0:
-                circularity = 4 * np.pi * (area / (perimeter * perimeter))
-                if circularity > 0.65:
-                    yellow_circles.append(cnt)
-
-    return red_triangles, yellow_circles
+    Example call:
+    ---
+    rect = rectify(img, markers)
+    '''
+    centres = np.array([markers[i].mean(axis=0) for i in REQUIRED_IDS])
+    middle = centres.mean(axis=0)
+    inner = []
+    for i in REQUIRED_IDS:
+        c = markers[i]
+        inner.append(c[np.argmin(np.linalg.norm(c - middle, axis=1))])
+    src = order_tl_tr_br_bl(inner)
+    dst = np.array([[0, 0], [SIZE - 1, 0],
+                    [SIZE - 1, SIZE - 1], [0, SIZE - 1]], dtype=np.float32)
+    H = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(img, H, (SIZE, SIZE))
 
 
-def compute_centroid(contour):
-    M = cv2.moments(contour)
-    if M["m00"] != 0:
-        cx = float(M["m10"] / M["m00"])
-        cy = float(M["m01"] / M["m00"])
-    else:
-        x, y, w, h = cv2.boundingRect(contour)
-        cx = x + w / 2.0
-        cy = y + h / 2.0
-    return (cx, cy)
+def build_grid():
+    '''
+    Purpose:
+    ---
+    Computes the 121 interior grid intersections of the rectified arena and
+    their names (column letter A-K, row number 1-11, e.g. "C2").
+
+    Input Arguments:
+    ---
+    None
+
+    Returns:
+    ---
+    `coords` :  [ numpy.ndarray, shape (121, 2) ]
+        (x, y) pixel position of each intersection
+
+    `names` :  [ list of str ]
+        matching labels, A1 (top-left) ... K11 (bottom-right)
+
+    Example call:
+    ---
+    coords, names = build_grid()
+    '''
+    step = (SIZE - 1) / CELLS
+    coords, names = [], []
+    for row in range(1, CELLS):           # rows 1..11, top to bottom
+        for col in range(1, CELLS):       # cols A..K, left to right
+            coords.append((col * step, row * step))
+            names.append(f"{chr(ord('A') + col - 1)}{row}")
+    return np.array(coords, dtype=np.float32), names
 
 
-def match_to_nearest_intersection(centroid, intersections):
-    cx, cy = centroid
-    min_dist = float("inf")
-    closest_label = ""
+def colour_masks(rect):
+    '''
+    Purpose:
+    ---
+    Builds cleaned binary masks for red and yellow objects using HSV
+    thresholds (OpenCV hue range is 0-179; red wraps around 0).
 
-    for label, (ix, iy) in intersections.items():
-        dist = np.hypot(cx - ix, cy - iy)
-        if dist < min_dist:
-            min_dist = dist
-            closest_label = label
+    Input Arguments:
+    ---
+    `rect` :  [ numpy.ndarray ]
+        rectified BGR image
 
-    return closest_label
+    Returns:
+    ---
+    `masks` :  [ dict ]
+        {"red": mask, "yellow": mask}
 
-
-def render_debug_composite(rectified_img, intersections, red_data, yellow_data):
-    result = rectified_img.copy()
-
-    for label, (x, y) in intersections.items():
-        cv2.circle(result, (int(x), int(y)), 3, (255, 0, 0), -1)
-
-    for pt_info in red_data:
-        x, y = int(pt_info[0]), int(pt_info[1])
-        cv2.circle(result, (x, y), 7, (0, 0, 255), 2)
-        cv2.putText(result, "R", (x + 5, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0, 0, 255), 1)
-
-    for pt_info in yellow_data:
-        x, y = int(pt_info[0]), int(pt_info[1])
-        cv2.circle(result, (x, y), 7, (0, 255, 255), 2)
-        cv2.putText(result, "Y", (x + 5, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0, 255, 255), 1)
-
-    return result
+    Example call:
+    ---
+    masks = colour_masks(rect)
+    '''
+    hsv = cv2.cvtColor(cv2.GaussianBlur(rect, (5, 5), 0), cv2.COLOR_BGR2HSV)
+    red = cv2.inRange(hsv, (0, 110, 70), (10, 255, 255)) | \
+          cv2.inRange(hsv, (170, 110, 70), (180, 255, 255))
+    yellow = cv2.inRange(hsv, (18, 110, 100), (38, 255, 255))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    out = {}
+    for name, m in (("red", red), ("yellow", yellow)):
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k)
+        out[name] = m
+    return out
 
 
-def export_results(image_path, marker_ids, critical_list, stable_list):
-    base_path = os.path.splitext(image_path)[0]
-    out_file = f"{base_path}_results.txt"
+def find_contours(mask):
+    '''
+    Purpose:
+    ---
+    Extracts outer contours from a mask, discarding blobs smaller than MIN_AREA.
 
-    sorted_ids = sorted(int(i) for i in marker_ids)
-    crit_str = ", ".join(critical_list)
-    stab_str = ", ".join(stable_list)
+    Input Arguments:
+    ---
+    `mask` :  [ numpy.ndarray ]
+        single-channel binary mask
 
-    marker_line = f"Detected marker IDs: {sorted_ids}"
-    critical_line = f"Critical Survivors: {crit_str}"
-    stable_line = f"Stable Survivors: {stab_str}"
+    Returns:
+    ---
+    `cnts` :  [ list ]
+        contours, one per survivor
 
-    with open(out_file, "w") as f:
-        f.write(marker_line + "\n\n")
-        f.write(critical_line + "\n")
-        f.write(stable_line + "\n")
+    Example call:
+    ---
+    cnts = find_contours(masks["red"])
+    '''
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return [c for c in cnts if cv2.contourArea(c) >= MIN_AREA]
 
-    return out_file
+
+def centre_of(cnt):
+    '''
+    Purpose:
+    ---
+    Returns the centroid of a contour from image moments. Falls back to the
+    bounding-box centre for zero-area regions (m00 == 0).
+
+    Input Arguments:
+    ---
+    `cnt` :  [ numpy.ndarray ]
+        a single contour
+
+    Returns:
+    ---
+    `cx, cy` :  [ float, float ]
+        centre point in pixels
+
+    Example call:
+    ---
+    cx, cy = centre_of(cnt)
+    '''
+    m = cv2.moments(cnt)
+    if m["m00"] > 1e-9:
+        return m["m10"] / m["m00"], m["m01"] / m["m00"]
+    x, y, w, h = cv2.boundingRect(cnt)
+    return x + w / 2.0, y + h / 2.0
+
+
+def nearest_name(pt, coords, names):
+    '''
+    Purpose:
+    ---
+    Returns the name of the grid intersection nearest to a point. Always
+    yields a valid label, even for points closer to the arena edge.
+
+    Input Arguments:
+    ---
+    `pt` :  [ tuple ]
+        (x, y) point in the rectified image
+
+    `coords` :  [ numpy.ndarray ]
+        intersection positions from build_grid
+
+    `names` :  [ list of str ]
+        intersection labels from build_grid
+
+    Returns:
+    ---
+    `label` :  [ str ]
+        e.g. "D2"
+
+    Example call:
+    ---
+    label = nearest_name((cx, cy), coords, names)
+    '''
+    d = np.linalg.norm(coords - np.array(pt, dtype=np.float32), axis=1)
+    return names[int(np.argmin(d))]
 
 
 def main():
-    args = parse_args()
-    img = load_image_and_validate(args.image)
-    ids, corners = detect_aruco_markers(img)
+    '''
+    Purpose:
+    ---
+    Runs the full pipeline: markers -> rectify -> grid -> colour regions ->
+    centres -> intersection names, then writes <image>_results.txt next to
+    the input image. Use --debug to also save a composite image.
 
-    target_dim = ARENA_DIM
-    rectified_img = straighten_arena(img, ids, corners, target_dim=target_dim)
-    intersections = generate_grid_intersections(target_dim=target_dim)
-    red_contours, yellow_contours = isolate_survivors(rectified_img)
+    Input Arguments:
+    ---
+    None (reads --image [--debug] from the command line)
 
-    critical_labels = []
-    red_centers = []
-    for cnt in red_contours:
-        center = compute_centroid(cnt)
-        label = match_to_nearest_intersection(center, intersections)
-        critical_labels.append(label)
-        red_centers.append(center)
+    Returns:
+    ---
+    None
 
-    stable_labels = []
-    yellow_centers = []
-    for cnt in yellow_contours:
-        center = compute_centroid(cnt)
-        label = match_to_nearest_intersection(center, intersections)
-        stable_labels.append(label)
-        yellow_centers.append(center)
+    Example call:
+    ---
+    python3 task1a.py --image image_1.jpg
+    '''
+    ap = argparse.ArgumentParser(description="Khojo Drone arena survivor detector")
+    ap.add_argument("--image", required=True, help="path to the arena image")
+    ap.add_argument("--debug", action="store_true",
+                    help="also save <image>_debug.png (composite of every step)")
+    args = ap.parse_args()
 
-    debug_img = render_debug_composite(rectified_img, intersections, red_centers, yellow_centers)
+    img = cv2.imread(args.image)
+    if img is None:
+        print(f"ERROR: could not load image '{args.image}'", file=sys.stderr)
+        sys.exit(1)
 
-    out_file = export_results(args.image, list(ids), critical_labels, stable_labels)
-    print(f"Results written to {out_file}")
+    markers = detect_markers(img)
+    print("Detected IDs:", sorted(markers))
+    missing = [i for i in REQUIRED_IDS if i not in markers]
+    if missing:
+        print(f"ERROR: missing marker ID(s) {missing}; cannot continue.",
+              file=sys.stderr)
+        sys.exit(1)
 
-    debug_path = f"{os.path.splitext(args.image)[0]}_debug.png"
-    cv2.imwrite(debug_path, debug_img)
-    print(f"Debug image written to {debug_path}")
+    rect = rectify(img, markers)
+    coords, names = build_grid()
 
-    if args.show:
-        try:
-            cv2.imshow("Debug Composite", debug_img)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-        except cv2.error as e:
-            print(f"Could not open a display window ({e}); see {debug_path} instead.")
+    masks = colour_masks(rect)
+    results = {"red": [], "yellow": []}
+    debug = rect.copy()
+    for (x, y) in coords:
+        cv2.circle(debug, (int(round(x)), int(round(y))), 2, (0, 255, 0), -1)
+
+    for colour in ("red", "yellow"):
+        cnts = find_contours(masks[colour])
+        print(f"{colour}: {len(cnts)} region(s)")
+        for c in cnts:
+            cx, cy = centre_of(c)
+            label = nearest_name((cx, cy), coords, names)
+            results[colour].append(label)
+            print(f"  {colour} centre=({cx:.1f},{cy:.1f}) -> {label}")
+            cv2.drawContours(debug, [c], -1, (255, 0, 0), 2)
+            cv2.circle(debug, (int(round(cx)), int(round(cy))), 4, (255, 0, 255), -1)
+            cv2.putText(debug, label, (int(cx) + 6, int(cy) - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            cv2.putText(debug, label, (int(cx) + 6, int(cy) - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    base = os.path.splitext(args.image)[0]
+    out_path = base + "_results.txt"
+    with open(out_path, "w") as f:
+        f.write(f"Detected marker IDs: {sorted(REQUIRED_IDS)}\n")
+        f.write("\n")
+        f.write("Critical Survivors: " + ", ".join(results["red"]) + "\n")
+        f.write("Stable Survivors: " + ", ".join(results["yellow"]) + "\n")
+    print("Wrote", out_path)
+
+    if args.debug:
+        dbg_path = base + "_debug.png"
+        cv2.imwrite(dbg_path, debug)
+        print("Wrote", dbg_path)
 
 
 if __name__ == "__main__":
