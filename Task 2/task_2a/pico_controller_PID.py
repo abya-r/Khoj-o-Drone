@@ -35,7 +35,7 @@ class Swift_Pico(Node):
 
         # This corresponds to the setpoint you want the drone to reach or hold
         # [x_desired_state, y_desired_state, z_desired_state]
-        self.desired_state = [1.0, -1.0, 13.0]  # whycode marker at the position of the drone given in the scene. Make the whycode marker associated with position_to_hold drone renderable and make changes accordingly
+        self.desired_state = [1.5, -1.5, 13.0]  # whycode marker at the position of the drone given in the scene. Make the whycode marker associated with position_to_hold drone renderable and make changes accordingly
 
         # Declaring a cmd of message type swift_msgs and initializing values
         self.cmd = SwiftMsgs()
@@ -46,20 +46,33 @@ class Swift_Pico(Node):
 
         # initial setting of Kp, Kd and ki for [roll, pitch, throttle]. eg: self.Kp[2] corresponds to Kp value in throttle axis
         # after tuning and computing corresponding PID parameters, change the parameters
-        self.Kp = [0, 0, 0]
-        self.Ki = [0, 0, 0]
-        self.Kd = [0, 0, 0]
+        self.Kp = [9.0, 9.0, 42.0]
+        self.Ki = [0.12, 0.12, 0.25]
+        self.Kd = [8.0, 8.0, 32.0]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
         # ==========================================
         # ABYA'S TASK: Core State Variables
         # Add variables for tracking previous errors, error sums (for integral), and error values:
-        #   self.prev_error = [0.0, 0.0, 0.0]
-        #   self.error_sum = [0.0, 0.0, 0.0]
-        #   self.error = [0.0, 0.0, 0.0]
+        self.error = [0.0, 0.0, 0.0]
+        self.prev_error = [0.0, 0.0, 0.0]
+        self.error_sum = [0.0, 0.0, 0.0]
+        self.out = [0.0, 0.0, 0.0]
         #   self.max_values = [2000, 2000, 2000]
         #   self.min_values = [1000, 1000, 1000]
         # ==========================================
+        self.direction = [1, 1, -1]
+        self.integral_zone = 1.0
+        self.integral_limit = [60.0, 60.0, 150.0]
+
+        self.marker_timeout = 0.3
+        self.last_marker_time = None
+        self.first_run = True
+
+        self.pos_error = Error()
+
+        self.max_values = [1800, 1800, 2000]
+        self.min_values = [1200, 1200, 1000]
         
         #----------------------------------------------------------------------------------------------------------
 
@@ -172,6 +185,47 @@ class Swift_Pico(Node):
     # 5. Clamp RC outputs between self.min_values and self.max_values
     # 6. Update self.prev_error[i] = self.error[i]
     # ==========================================
+        if self.last_marker_time is None or (self.get_clock().now() - self.last_marker_time).nanoseconds * 1e-9 > self.marker_timeout:
+            self.cmd.rc_pitch = 1500
+            self.cmd.rc_roll = 1500
+            self.cmd.rc_throttle = 1500
+            self.command_pub.publish(self.cmd)
+            self.error_sum = [0.0, 0.0, 0.0]
+            self.first_run = True
+            return
+
+        for i in range(3):
+			# 1. error = desired - current
+            self.error[i] = self.desired_state[i] - self.current_state[i]
+            if self.first_run:
+                self.prev_error[i] = self.error[i]
+ 
+			# 2. error_sum (only near the setpoint, clamped -> no windup) and change in error
+            if abs(self.error[i]) < self.integral_zone:
+                self.error_sum[i] += self.error[i]
+            else:
+                self.error_sum[i] = 0.0
+            if self.Ki[i] > 0:
+                limit = self.integral_limit[i] / self.Ki[i]
+                self.error_sum[i] = max(-limit, min(limit, self.error_sum[i]))
+            d_error = self.error[i] - self.prev_error[i]
+ 
+			# 3. pid output, with the sign of this axis
+            self.out[i] = self.direction[i] * (self.Kp[i] * self.error[i] + self.Ki[i] * self.error_sum[i] + self.Kd[i] * d_error)
+ 
+			# 7. update previous error
+            self.prev_error[i] = self.error[i]
+        self.first_run = False
+ 
+		# 4. + 6. add to the neutral value 1500 and limit to the valid range
+        self.cmd.rc_pitch = int(max(self.min_values[0], min(self.max_values[0], 1500 + self.out[0])))
+        self.cmd.rc_roll = int(max(self.min_values[1], min(self.max_values[1], 1500 + self.out[1])))
+        self.cmd.rc_throttle = int(max(self.min_values[2], min(self.max_values[2], 1500 + self.out[2])))
+ 
+		# errors to publish
+        self.pos_error.pitch_error = float(self.error[0])
+        self.pos_error.roll_error = float(self.error[1])
+        self.pos_error.throttle_error = float(self.error[2])
 
     #------------------------------------------------------------------------------------------------------------------------
         self.command_pub.publish(self.cmd)
@@ -185,6 +239,7 @@ class Swift_Pico(Node):
         #   pos_error_msg.z_error = float(self.error[2])
         #   self.pos_error_pub.publish(pos_error_msg)
         # ==========================================
+        self.pos_error_pub.publish(self.pos_error)
 
 
 def main(args=None):
