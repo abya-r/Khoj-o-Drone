@@ -245,7 +245,8 @@ class Swift_Pico(Node):
 def main(args=None):
     rclpy.init(args=args)
     swift_pico = Swift_Pico()
-
+     # Creating a timer to run the pid function periodically, refer ROS 2 tutorials on how to create a publisher subscriber(Python)
+        self.create_timer(self.sample_time, self.pid)
     # ==========================================
     # KRITIKA'S TASK: Execution & Shutdown
     # Ensure clean spin loop and safe node shutdown sequence
