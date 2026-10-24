@@ -48,9 +48,9 @@ class Swift_Pico(Node):
         #initial setting of Kp, Kd and ki for [roll, pitch, throttle]. eg: self.Kp[2] corresponds to Kp value in throttle axis
         #after tuning and computing corresponding PID parameters, change the parameters
 
-        self.Kp = [30.0, 30.0, 42.0]
+        self.Kp = [81.0, 81.0, 42.0]
         self.Ki = [0.0, 0.0, 0.25]
-        self.Kd = [5454.5, 5454.5, 963.6]
+        self.Kd = [9090.9, 9090.9, 963.6]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
         self.error = [0.0, 0.0, 0.0]        # error in [x, y, z] = [pitch, roll, throttle]
