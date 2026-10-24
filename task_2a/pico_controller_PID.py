@@ -48,31 +48,23 @@ class Swift_Pico(Node):
         #initial setting of Kp, Kd and ki for [roll, pitch, throttle]. eg: self.Kp[2] corresponds to Kp value in throttle axis
         #after tuning and computing corresponding PID parameters, change the parameters
 
-        self.Kp = [30.0, 30.0, 42.0]      # starting values = Task 1C gains
+        self.Kp = [30.0, 30.0, 42.0]
         self.Ki = [0.0, 0.0, 0.25]
-        self.Kd = [180.0, 180.0, 31.8]
+        self.Kd = [5454.5, 5454.5, 963.6]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
-        self.error = [0.0, 0.0, 0.0]        # [x, y, z] = [pitch, roll, throttle] error (desired - current)
-        self.prev_error = [0.0, 0.0, 0.0]
+        self.error = [0.0, 0.0, 0.0]        # error in [x, y, z] = [pitch, roll, throttle]
         self.error_sum = [0.0, 0.0, 0.0]
-        self.out = [0.0, 0.0, 0.0]          # pid output, [x, y, z] = [pitch, roll, throttle]
-
-        self.gain_index = [1, 0, 2]         # gain list position of [x, y, z]: x -> pitch = 1, y -> roll = 0, z -> throttle = 2
-        self.direction = [1, 1, -1]         # sign of the output for [pitch, roll, throttle]. Camera looks down, so larger z = lower drone -> throttle is -1. Flip pitch/roll if the drone moves away from the setpoint
-
-        self.integral_zone = 1.0                    # anti-windup: only add to error_sum when closer than this to the setpoint
-        self.integral_limit = [60.0, 60.0, 150.0]   # anti-windup: clamp on Ki * error_sum, [pitch, roll, throttle]
-
-        self.marker_timeout = 0.3           # seconds without a marker before we stop steering and publish neutral
-        self.last_marker_time = None
-        self.first_run = True               # skips the derivative term on the first sample
-
-        self.pos_error = Error()
+        self.out = [0.0, 0.0, 0.0]          # pid output in [x, y, z] = [pitch, roll, throttle]
+        self.gain_index = [1, 0, 2]         # position of [x, y, z] in the Kp, Ki, Kd lists ([roll, pitch, throttle])
+        self.direction = [1, 1, -1]         # sign of the output for [pitch, roll, throttle]
+        self.integral_zone = 1.0            # error_sum is only added to when the error is smaller than this
+        self.integral_limit = [60.0, 60.0, 150.0]  # limit on Ki * error_sum
 
         # Hint : Add variables for storing previous errors in each axis, like self.prev_error = [0,0,0] where corresponds to [pitch, roll, throttle]        #        Add variables for limiting the values like self.max_values = [2000,2000,2000] corresponding to [roll, pitch, throttle]
         #                                                   self.min_values = [1000,1000,1000] corresponding to [pitch, roll, throttle]
         #                                                                   You can change the upper limit and lower limit accordingly.
+        self.prev_error = [0.0, 0.0, 0.0]
         self.max_values = [1800, 1800, 2000]
         self.min_values = [1200, 1200, 1000]
         #----------------------------------------------------------------------------------------------------------
@@ -87,6 +79,7 @@ class Swift_Pico(Node):
         self.heartbeat_pub = self.create_publisher(Header, '/controller_heartbeat', 10)
 
         #------------------------Add other ROS 2 Publishers here-----------------------------------------------------
+        self.pos_error = Error()
 
 
         # Subscribing to /whycode_node/markers, /throttle_pid, /pitch_pid, roll_pid
@@ -141,7 +134,6 @@ class Swift_Pico(Node):
         #--------------------Set the remaining co-ordinates of the drone from msg----------------------------------------------
         self.current_state[1] = msg.markers[0].position.position.y
         self.current_state[2] = msg.markers[0].position.position.z
-        self.last_marker_time = self.get_clock().now()
         #---------------------------------------------------------------------------------------------------------------
 
 
@@ -150,18 +142,18 @@ class Swift_Pico(Node):
     def altitude_set_pid(self, alt):
         self.Kp[2] = alt.kp * 0.03  # This is just for an example. You can change the ratio/fraction value accordingly
         self.Ki[2] = alt.ki * 0.008
-        self.Kd[2] = alt.kd * 0.6
+        self.Kd[2] = alt.kd * 18.18
 
     #----------------------------Define callback function like altitide_set_pid to tune pitch, roll--------------
     def pitch_set_pid(self, pitch):
         self.Kp[1] = pitch.kp * 0.03
         self.Ki[1] = pitch.ki * 0.008
-        self.Kd[1] = pitch.kd * 0.6
+        self.Kd[1] = pitch.kd * 18.18
 
     def roll_set_pid(self, roll):
         self.Kp[0] = roll.kp * 0.03
         self.Ki[0] = roll.ki * 0.008
-        self.Kd[0] = roll.kd * 0.6
+        self.Kd[0] = roll.kd * 18.18
     #----------------------------------------------------------------------------------------------------------------------
 
 
@@ -179,25 +171,13 @@ class Swift_Pico(Node):
     #   7. Update previous errors.eg: self.prev_error[1] = error[1] where index 1 corresponds to that of pitch (eg)
     #   8. Add error_sum
 
-        # no marker (or lost for too long) -> hover neutral and clear the memory
-        if self.last_marker_time is None or (self.get_clock().now() - self.last_marker_time).nanoseconds * 1e-9 > self.marker_timeout:
-            self.cmd.rc_pitch = 1500
-            self.cmd.rc_roll = 1500
-            self.cmd.rc_throttle = 1500
-            self.command_pub.publish(self.cmd)
-            self.error_sum = [0.0, 0.0, 0.0]
-            self.first_run = True
-            return
-
         for i in range(3):  # i: 0 = x (pitch), 1 = y (roll), 2 = z (throttle)
-            g = self.gain_index[i]  # position of this axis in Kp, Ki, Kd
+            g = self.gain_index[i]
 
             # 1. error
             self.error[i] = self.desired_state[i] - self.current_state[i]
-            if self.first_run:
-                self.prev_error[i] = self.error[i]
 
-            # 2. sum of errors (only near the setpoint, clamped -> no windup) and change in error
+            # 2. sum of errors (stops adding far from the setpoint and is limited -> no windup), change in error
             if abs(self.error[i]) < self.integral_zone:
                 self.error_sum[i] += self.error[i]  # 8. Add error_sum
             else:
@@ -205,14 +185,13 @@ class Swift_Pico(Node):
             if self.Ki[g] > 0:
                 limit = self.integral_limit[i] / self.Ki[g]
                 self.error_sum[i] = max(-limit, min(limit, self.error_sum[i]))
-            d_error = (self.error[i] - self.prev_error[i]) / self.sample_time
+            d_error = self.error[i] - self.prev_error[i]
 
             # 3. pid output of this axis (with its sign)
             self.out[i] = self.direction[i] * (self.Kp[g] * self.error[i] + self.Ki[g] * self.error_sum[i] + self.Kd[g] * d_error)
 
             # 7. update previous error
             self.prev_error[i] = self.error[i]
-        self.first_run = False
 
         # 4. + 6. add to the average value 1500 and limit between min and max (max_values / min_values order: [roll, pitch, throttle])
         self.cmd.rc_roll = int(max(self.min_values[0], min(self.max_values[0], 1500 + self.out[1])))
