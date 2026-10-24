@@ -69,17 +69,15 @@ install(
 )
 
 # --- Python example: pico_controller_PID.py -----------------------------------
-install(
-  PROGRAMS src/pico_controller_PID.py
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-# Add the LQR controller and the waypoint service, client and server nodes below this line.
 install(PROGRAMS
   src/waypoint_service.py
   src/pico_client.py
   src/pico_server.py
   DESTINATION lib/${PROJECT_NAME}
 )
+
+ament_package()
+
+# Add the LQR controller and the waypoint service, client and server nodes below this line.
 
 ament_package()
