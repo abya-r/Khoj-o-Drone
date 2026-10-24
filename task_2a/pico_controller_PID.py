@@ -50,7 +50,7 @@ class Swift_Pico(Node):
 
         self.Kp = [81.0, 81.0, 42.0]
         self.Ki = [0.0, 0.0, 0.5]
-        self.Kd = [6060.6, 6060.6, 1515.2]
+        self.Kd = [6060.6, 6060.6, 1900.0]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
         self.error = [0.0, 0.0, 0.0]        # error in [x, y, z] = [pitch, roll, throttle]
@@ -58,7 +58,7 @@ class Swift_Pico(Node):
         self.out = [0.0, 0.0, 0.0]          # pid output in [x, y, z] = [pitch, roll, throttle]
         self.gain_index = [1, 0, 2]         # position of [x, y, z] in the Kp, Ki, Kd lists ([roll, pitch, throttle])
         self.direction = [1, 1, -1]         # sign of the output for [pitch, roll, throttle]
-        self.integral_zone = 1.0            # error_sum is only added to when the error is smaller than this
+        self.integral_zone = 0.5            # error_sum is only added to when the error is smaller than this
         self.integral_limit = [60.0, 60.0, 150.0]  # limit on Ki * error_sum
 
         # Hint : Add variables for storing previous errors in each axis, like self.prev_error = [0,0,0] where corresponds to [pitch, roll, throttle]        #        Add variables for limiting the values like self.max_values = [2000,2000,2000] corresponding to [roll, pitch, throttle]
