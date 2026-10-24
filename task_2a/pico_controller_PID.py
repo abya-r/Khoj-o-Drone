@@ -21,6 +21,7 @@ from whycode_interfaces.msg import MarkerArray
 from controller_msg.msg import PIDTune
 from error_msg.msg import Error
 from std_msgs.msg import Header
+import time
 import rclpy
 from rclpy.node import Node
 
@@ -96,10 +97,11 @@ class Swift_Pico(Node):
         self.create_subscription(PIDTune, "/pitch_pid", self.pitch_set_pid, 1)
         self.create_subscription(PIDTune, "/roll_pid", self.roll_set_pid, 1)
 
-        self.arm()  # ARMING THE DRONE
-
         self.publish_heartbeat()
-        self.create_timer(1.0, self.publish_heartbeat)
+        self.create_timer(0.1, self.publish_heartbeat)
+
+        time.sleep(0.5)  # let the heartbeat reach the rosbag before arming
+        self.arm()  # ARMING THE DRONE
 
         # Creating a timer to run the pid function periodically, refer ROS 2 tutorials on how to create a publisher subscriber(Python)
         self.create_timer(self.sample_time, self.pid)
