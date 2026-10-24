@@ -69,7 +69,8 @@ install(
 )
 
 # --- Python example: pico_controller_PID.py -----------------------------------
-install(PROGRAMS
+install(
+  PROGRAMS src/pico_controller_PID.py
   src/waypoint_service.py
   src/pico_client.py
   src/pico_server.py
