@@ -205,7 +205,7 @@ class Swift_Pico(Node):
             if self.Ki[g] > 0:
                 limit = self.integral_limit[i] / self.Ki[g]
                 self.error_sum[i] = max(-limit, min(limit, self.error_sum[i]))
-            d_error = self.error[i] - self.prev_error[i]
+            d_error = (self.error[i] - self.prev_error[i]) / self.sample_time
 
             # 3. pid output of this axis (with its sign)
             self.out[i] = self.direction[i] * (self.Kp[g] * self.error[i] + self.Ki[g] * self.error_sum[i] + self.Kd[g] * d_error)
