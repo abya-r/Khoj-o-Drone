@@ -50,7 +50,7 @@ class Swift_Pico(Node):
 
         self.Kp = [81.0, 81.0, 42.0]
         self.Ki = [0.0, 0.0, 0.25]
-        self.Kd = [6060.6, 6060.6, 963.6]
+        self.Kd = [6060.6, 6060.6, 1515.2]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
         self.error = [0.0, 0.0, 0.0]        # error in [x, y, z] = [pitch, roll, throttle]
