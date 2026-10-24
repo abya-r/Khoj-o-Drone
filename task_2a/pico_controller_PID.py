@@ -49,7 +49,7 @@ class Swift_Pico(Node):
         #after tuning and computing corresponding PID parameters, change the parameters
 
         self.Kp = [81.0, 81.0, 42.0]
-        self.Ki = [0.0, 0.0, 0.25]
+        self.Ki = [0.0, 0.0, 0.5]
         self.Kd = [6060.6, 6060.6, 1515.2]
 
         #-----------------------Add other required variables for pid here ----------------------------------------------
