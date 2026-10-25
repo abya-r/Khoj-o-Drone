@@ -2,38 +2,29 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>swift_pico</name>
-  <version>1.0.0</version>
-  <description>Controller Package for Swift Pico</description>
-  <maintainer email="drone@e-yantra.org">eyantra_drone_team</maintainer>
-  <license>TODO: License declaration</license>
-  <author>Eyantra Drone Team</author>
+  <version>0.0.0</version>
+  <description>Swift Pico drone control: position controller, waypoint action server, client and service</description>
+  <maintainer email="you@example.com">your_name</maintainer>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclpy</depend>
-  <depend>rclcpp</depend>
-  <depend>swift_msgs</depend>           
-  <depend>controller_msg</depend>      
-  <depend>error_msg</depend>            
-  <depend>geometry_msgs</depend>
-  <depend>whycode_interfaces</depend>
   <depend>std_msgs</depend>
-  <!-- <depend>waypoint_navigation</depend> -->
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
 
-  <depend>rosgraph_msgs</depend>      
-  <depend>sensor_msgs</depend>          
-  <depend>actuator_msgs</depend>      
-  <depend>nav_msgs</depend>            
-  
-  <depend>ament_index_python</depend>
-  <depend>ament_index_cpp</depend>
-  <depend>builtin_interfaces</depend>
-  <depend>libglfw3-dev</depend>
-  <depend>eigen</depend>
+  <!-- Task 2B: this line is what makes colcon build waypoint_navigation first -->
+  <depend>waypoint_navigation</depend>
 
-  <exec_depend>swift_pico_description</exec_depend>
-  <exec_depend>ros2launch</exec_depend>
-  <exec_depend>image_view</exec_depend>
+  <!-- messages used by your controller (keep the ones already in your file) -->
+  <depend>swift_msgs</depend>
+  <depend>whycode_interfaces</depend>
+  <depend>controller_msg</depend>
+  <depend>error_msg</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
