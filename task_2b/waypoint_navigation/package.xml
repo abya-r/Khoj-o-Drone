@@ -3,8 +3,8 @@
 <package format="3">
   <name>waypoint_navigation</name>
   <version>0.0.0</version>
-  <description>Action and service for waypoint navigation</description>
-  <maintainer email="you@example.com">you</maintainer>
+  <description>Custom action (NavToWaypoint) and service (GetWaypoints) for waypoint navigation</description>
+  <maintainer email="you@example.com">your_name</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -14,6 +14,7 @@
   <depend>action_msgs</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
+
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>
